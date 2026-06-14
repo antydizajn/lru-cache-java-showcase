@@ -1,31 +1,32 @@
-# LRU Cache in Java 21+ — three AI takes, side by side
+# LRU Cache in Java 21+ — four AI takes, side by side
 
-Three independently written, **production-grade, thread-safe, bounded LRU cache** implementations
+Four independently written, **production-grade, thread-safe, bounded LRU cache** implementations
 for Java 21+, each as a single self-contained util class with **zero external dependencies** and
 a built-in test harness (no JUnit).
 
-All three were written by the same agent (Gniewisława, running on Anthropic Claude / Google Gemini
-via ) to the same prompt:
+All four were written by the same agent (Gniewisława, running on Anthropic Claude / Google Gemini /
+OpenAI GPT) to the same prompt:
 
 > *"Write a production LRU implementation in Java 21+. The code must handle every edge case you can
 > think of, and will function as a util class across different places and use cases."*
 
-The files are a **cross-model comparison** — same task, three different frontier models. Each file is
+The files are a **cross-model comparison** — same task, four different frontier models. Each file is
 the **verbatim, unedited** output of its model (each compiled `-Xlint:all` clean and passed its own
 test suite with no human/agent fixes to the cache logic). Read them against each other.
 
-## The three implementations
+## The four implementations
 
 | File | Author | Lines | Highlights |
 | --- | --- | --- | --- |
 | [`src/LruCache.java`](src/LruCache.java) | Claude Opus 4.7 | 610 | O(1) intrusive list + HashMap, `ReentrantLock`, `record` stats, eviction listener, `computeIfAbsent`, virtual-thread concurrency test |
 | [`src/LruCacheOpus48.java`](src/LruCacheOpus48.java) | Claude Opus 4.8 | 769 | Everything in 4.7 **plus**: time-based expiry (`expireAfterWrite`) with an **injectable clock** for deterministic TTL tests, typed `RemovalCause` callback, non-mutating `peek`, `putIfAbsent`, `getOrDefault`, snapshot `forEach`, `purgeExpired`, richer stats |
 | [`src/LruCacheGemini35Flash.java`](src/LruCacheGemini35Flash.java) | Gemini 3.5 Flash | 516 | O(1) intrusive list + HashMap, `ReentrantLock`, `record` stats (`CacheStats`), builder, remove/clear, property-diff vs `LinkedHashMap`, virtual-thread concurrency test |
+| [`src/LruCacheGpt55.java`](src/LruCacheGpt55.java) | GPT-5.5 | 726 | O(1) intrusive list + HashMap, `ReentrantLock`, `record` stats, builder, remove/clear, `SplittableRandom`-driven property-diff vs `LinkedHashMap`, virtual-thread concurrency test |
 
-> **Provenance note.** The Gemini file is the genuine output of `gemini-3.5-flash` called directly
-> direct from the model (`modelVersion: gemini-3.5-flash`, `finishReason: STOP`,
-> 13,107 tokens). It was **not** written by Claude and then relabelled — that distinction matters
-> for an honest cross-model comparison.
+> **Provenance note.** The Gemini and GPT files are the genuine outputs of `gemini-3.5-flash` and
+> `gpt-5.5` called directly directly (Gemini: `modelVersion: gemini-3.5-flash`,
+> `finishReason: STOP`; GPT: `model: gpt-5.5-2026-04-23`, `finish_reason: stop`). They were **not**
+> written by Claude and relabelled — that distinction matters for an honest cross-model comparison.
 
 ## What they share (the correctness core)
 - **O(1) `get`/`put`** via a hand-rolled intrusive doubly-linked list (sentinel head/tail) + `HashMap`.
@@ -38,10 +39,12 @@ test suite with no human/agent fixes to the cache logic). Read them against each
 
 ### Notable differences worth a reviewer's eye
 - **Opus 4.8** is the only one with **TTL + an injectable clock**, which makes expiry unit-testable
-  without `Thread.sleep` — the biggest correctness/testability jump of the three.
+  without `Thread.sleep` — the biggest correctness/testability jump of the four.
 - **Opus 4.7** adds an eviction listener + `computeIfAbsent` over a clean minimal core.
 - **Gemini 3.5 Flash** is the most compact (516 lines) while still shipping the full
   property-diff-vs-`LinkedHashMap` harness and a virtual-thread test — a tight, idiomatic take.
+- **GPT-5.5** reaches for `SplittableRandom` and `IdentityHashMap` in its test scaffolding — a
+  distinct stylistic fingerprint from the others.
 
 ## Run it
 
@@ -49,13 +52,16 @@ Requires a JDK 21 or newer (developed/tested on JDK 25). No build tool needed.
 
 ```bash
 # Claude Opus 4.7
-javac src/LruCache.java            && java -ea -cp src LruCache
+javac src/LruCache.java              && java -ea -cp src LruCache
 
 # Claude Opus 4.8 (adds TTL / removal-cause / peek suites)
-javac src/LruCacheOpus48.java      && java -ea -cp src LruCacheOpus48
+javac src/LruCacheOpus48.java        && java -ea -cp src LruCacheOpus48
 
 # Gemini 3.5 Flash
 javac src/LruCacheGemini35Flash.java && java -ea -cp src LruCacheGemini35Flash
+
+# GPT-5.5
+javac src/LruCacheGpt55.java         && java -ea -cp src LruCacheGpt55
 ```
 
 `-ea` enables assertions; each harness throws and exits non-zero if any check fails.
@@ -71,12 +77,14 @@ Concurrency (32 vthreads):  1,600,000 ops, 0 failed
 smoke 12 | ttl 7 | removal 3 | compute 6 | property 162 | concurrent 1,920,000 ops — 0 failed
 
 # LruCacheGemini35Flash (Gemini 3.5 Flash)
-smoke: passed | property-diff vs LinkedHashMap: passed
-concurrency (virtual threads, ~500k ops): passed
+smoke: passed | property-diff vs LinkedHashMap: passed | concurrency (virtual threads): passed
+
+# LruCacheGpt55 (GPT-5.5)
+All LruCacheGpt55 tests passed (smoke + property-diff vs LinkedHashMap + virtual-thread concurrency)
 ```
 
 ## Known limitations (read before you quote the numbers)
-- **Single global lock** in all three. Fine for moderate contention; for extreme read-heavy
+- **Single global lock** in all four. Fine for moderate contention; for extreme read-heavy
   concurrency a buffer-based design (Caffeine) wins. These are self-contained util classes, not a
   cache library.
 - **The bundled "benchmarks" are smoke checks, not JMH** — they guard against gross regressions; they
