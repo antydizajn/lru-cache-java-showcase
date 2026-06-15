@@ -168,16 +168,30 @@ regression tests** that fail on the old code and pass on the new.
 | --- | :-: | :-: | :-: | :-: | :-: | :-: |
 | Compiles `-Xlint:all` clean | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Own test suite passes | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Property-diff vs JDK LRU | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | TTL + **injectable clock** | — | ✅ | ✅ | ✅ | — | — |
 | Typed `RemovalCause` callback | — | ✅ | ✅ | ✅ | — | — |
-| `LongAdder` counters | — | — | ✅ | ✅ | — | — |
-| Property-diff vs JDK LRU | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Lock-free reads** (no lock in `get`) | ✅ | — | — | — | — | — |
 | **Reentrancy-safe `computeIfAbsent`** | ✅ | ✅ | ❌ | ✅ | n/a | n/a |
 | **Expired-overwrite counts `EXPIRED`** | n/a | ✅ | ❌ | ✅ | n/a | n/a |
 | **Atomic `getOrDefault`** | n/a | ✅ | ❌ | ✅ | n/a | n/a |
-| **Lock-free reads** (no lock in `get`) | ✅ | — | — | — | — | — |
 | Survived adversarial cross-model + human review | — | — | — | ✅ | — | — |
 | Lines | 610 | 769 | 800 | 845 | **516** | 726 |
+
+### The "priming advantages" scorecard — what a senior review did to it
+
+These are the three features the priming was *supposed* to add. The review checked whether each is
+a real advantage or just senior-sounding decoration. Every cell is re-grep-able.
+
+| Claimed priming win | What it actually is | Verdict |
+| --- | --- | --- |
+| `LongAdder` "for contended counters" | 17 of 19 `increment()` calls are **inside `lock.lock()`** — the lock serializes every write, so the striping buys nothing. `AtomicLong` (or a plain `long`) would do the same, cheaper. And `LongAdder` only entered via a **compile error** (`AtomicLong.increment()` doesn't exist), not a design choice. | ❌ hollow |
+| `@GuardedBy("lock")` "explicit confinement" | It's a `// @GuardedBy(...)` **comment** — no import, no jcip/Error Prone/Checker, nothing enforces it. Documentation, not static analysis. | ❌ comment, not annotation |
+| "Caffeine / W-TinyLFU" named | The file has **zero** Caffeine machinery (no ring buffer, no frequency sketch). Its own Javadoc admits "what we are NOT". Reviewer's analogy: *"Selling a used Opel by advertising 'NOT a Mercedes, Hyundai, BMW'."* Ironically **4.7** actually has Caffeine-style lock-free reads — the primed file name-dropped a strength it doesn't have. | ❌ marketing, not a feature |
+| (side effect of priming) | Introduced a **regression** — silent expired-overwrite — that plain 4.8 did **not** have. | ❌ net negative |
+
+**Net:** of the priming's headline wins, three are hollow and one is an actual regression. The real,
+measurable gains in this repo came from the **review**, not the priming. (All fixed in `4.8 reviewed`.)
 
 **Verdict by use case:**
 - **Best overall (correctness):** **Opus 4.8 reviewed** — the only file whose bugs were found *and
