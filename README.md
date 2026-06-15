@@ -42,8 +42,8 @@ self-contained file. Rules to keep the comparison fair and honest:
 | [`src/LruCacheOpus48Activated.java`](src/LruCacheOpus48Activated.java) | Claude Opus 4.8 *(weight-activation primed)* | 800 | Opus 4.8 again, primed on the canonical concurrency literature: **`LongAdder`** striped counters (Doug Lea) instead of `AtomicLong`, explicit `@GuardedBy("lock")` confinement (Goetz), Caffeine/W-TinyLFU named as the honest "what this is NOT", TTL + injectable clock, exhaustive pattern-matched `RemovalCause` switch, 200k-op property-diff vs JDK LRU **plus** a post-storm `checkInvariant()` |
 
 > **Provenance note.** The Gemini and GPT files are the genuine outputs of `gemini-3.5-flash` and
-> `gpt-5.5` called directly directly (Gemini: `modelVersion: gemini-3.5-flash`,
-> `finishReason: STOP`; GPT: `model: gpt-5.5-2026-04-23`, `finish_reason: stop`). They were **not**
+> `gpt-5.5` (Gemini: `modelVersion: gemini-3.5-flash`, `finishReason: STOP`; GPT:
+> `model: gpt-5.5-2026-04-23`, `finish_reason: stop`). They were **not**
 > written by Claude and relabelled — that distinction matters for an honest cross-model comparison.
 >
 > **Caveat on the primed file.** `LruCacheOpus48Activated.java` is the genuine verbatim output of
