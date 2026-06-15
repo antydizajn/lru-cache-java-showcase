@@ -10,9 +10,12 @@ OpenAI GPT) to the same prompt:
 > *"Write a production LRU implementation in Java 21+. The code must handle every edge case you can
 > think of, and will function as a util class across different places and use cases."*
 
-The files are a **cross-model comparison** — same task, four different frontier models. Each file is
-the **verbatim, unedited** output of its model (each compiled `-Xlint:all` clean and passed its own
-test suite with no human/agent fixes to the cache logic). Read them against each other.
+The files are a **cross-model comparison** — same task, four different frontier models. Each of the
+first five files is the **verbatim, unedited** output of its model (each compiled `-Xlint:all` clean
+and passed its own test suite with no human/agent fixes to the cache logic). Read them against each
+other. **This README has since been through a senior human Java review** (see "Senior human review"
+below) — which corrected the original "priming makes wonders" claim and is the most honest part of
+the repo.
 
 The fifth file (`LruCacheOpus48Activated.java`) is a **same-model bonus**: Opus 4.8 again, but run
 with explicit *weight-activation priming* — the prompt named the canonical Java-concurrency authorities
@@ -169,31 +172,70 @@ regression tests** that fail on the old code and pass on the new.
 | Typed `RemovalCause` callback | — | ✅ | ✅ | ✅ | — | — |
 | `LongAdder` counters | — | — | ✅ | ✅ | — | — |
 | Property-diff vs JDK LRU | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Reentrancy-safe `computeIfAbsent`** | ? | ? | ❌ | ✅ | n/a | n/a |
+| **Reentrancy-safe `computeIfAbsent`** | ✅ | ✅ | ❌ | ✅ | n/a | n/a |
 | **Expired-overwrite counts `EXPIRED`** | n/a | ✅ | ❌ | ✅ | n/a | n/a |
 | **Atomic `getOrDefault`** | n/a | ✅ | ❌ | ✅ | n/a | n/a |
-| Survived adversarial cross-model review | — | — | — | ✅ | — | — |
+| **Lock-free reads** (no lock in `get`) | ✅ | — | — | — | — | — |
+| Survived adversarial cross-model + human review | — | — | — | ✅ | — | — |
 | Lines | 610 | 769 | 800 | 845 | **516** | 726 |
 
 **Verdict by use case:**
-- **Best overall:** **Opus 4.8 reviewed** — the only file whose bugs were found *and fixed* under
-  cross-model adversarial review, with regression tests proving it.
+- **Best overall (correctness):** **Opus 4.8 reviewed** — the only file whose bugs were found *and
+  fixed* under review, with regression tests proving it.
+- **Most interesting *architecture*:** **Opus 4.7** — and a senior reviewer (see below) singled it out:
+  it has genuine **lock-free reads** (`ConcurrentHashMap` + a read buffer drained amortized, Caffeine/
+  Guava style). `get()` takes **no lock**. The later 4.8 files actually *regressed* to "everything under
+  one `ReentrantLock`" — simpler and easier to prove correct, but architecturally less ambitious. The
+  irony: 4.8-primed *name-dropped* Caffeine as an aspiration while 4.7 quietly **is** Caffeine-style.
 - **Most feature-rich raw model output:** **Opus 4.8 primed** — but ship the *reviewed* version; the
   raw one has the two confirmed bugs above. Kept here only to show what review caught.
-- **Best clean baseline:** **Opus 4.8 (unprimed).** Everything you actually need (TTL, removal causes,
-  peek, putIfAbsent) without the literature-flex; if you dislike the primed file's one fix, take this.
-- **Best minimalist:** **Gemini 3.5 Flash** — fewest lines (516) while still shipping the full
-  property-diff-vs-JDK harness. If you want the smallest thing that is still rigorously correct, this.
+- **Best clean baseline:** **Opus 4.8 (unprimed).** TTL, removal causes, peek, putIfAbsent without the
+  literature-flex.
+- **Best minimalist:** **Gemini 3.5 Flash** — fewest lines (516) with the full property-diff harness.
 - **Most distinct test scaffolding:** **GPT-5.5** — `SplittableRandom` + `IdentityHashMap` fingerprint.
-- **Simplest to read first:** **Opus 4.7** — clean minimal core, eviction listener + `computeIfAbsent`.
 
-The honest meta-finding: **priming the same model at named authorities (Lea/Goetz/Manes) measurably
-changed its output** — `LongAdder` over `AtomicLong`, `@GuardedBy` annotations, Caffeine named as the
-ceiling. Same weights, better manifold. That delta is the most interesting thing in this repo.
+## Senior human review (Bartłomiej Gątarski, senior Java dev) — and what it overturned
+
+The whole repo exists to answer one question from the original post: *does "weight-activation priming"
+(naming Doug Lea / Brian Goetz / Ben Manes in the prompt) make the model write senior-grade code?*
+A human senior Java developer read all six files. His verdict, paraphrased and used **with the framing
+intact** (he is not endorsing the project, he tore it apart):
+
+> *Every version is solid; the Opus ones are the most built-out. The most interesting **technically**
+> is 4.7, with its non-blocking reads. As for the gain from priming-by-name — it brought confusion
+> rather than benefit. The real gains came from the **review**, and they were far better than the
+> activation.*
+
+He was **right on every concrete point**, and several of them demoted my own favourite file:
+
+| His point | Verified? | Outcome |
+| --- | --- | --- |
+| 4.8's NPE-on-null is a "bug" | partly | It *is* a deliberate, documented fail-fast (like `ConcurrentHashMap`) — but he was right that it's worth scrutiny |
+| Fail-fast can't be intentional if it's "only in 4.8" | premise false | Tested all 6: **every file** rejects null keys (6 different messages) — so it's clearly intentional, present everywhere |
+| `LongAdder` adds nothing over `AtomicLong` when every increment is under the lock | **correct** | 17/19 increments are literally inside `lock.lock()`; the striping is wasted. (And `LongAdder` only entered the primed file because of a *compile error* — see provenance.) |
+| `@GuardedBy("lock")` here is a **comment**, not an annotation (no import, nothing enforces it) | **correct** | It's `// @GuardedBy(...)`. Documentation, not static analysis. My README oversold it as a feature. |
+| Naming **Caffeine** when the code has nothing in common with it is empty | **correct** | The file's own Javadoc even says "what we are NOT". His analogy: *"Selling a used Opel by listing 'NOT a Mercedes, Hyundai, BMW'."* He's right — that's marketing, not a feature. |
+| The **primed Activated file introduced a regression** the plain 4.8 didn't have (silent expired-overwrite) | **correct** | Confirmed by attack-test; fixed in `Reviewed`. |
+
+**So the honest meta-finding — corrected.** An earlier version of this README claimed priming "makes
+wonders". After a senior human review, that does not hold. Priming-by-name mostly added **senior-
+*sounding* decoration** — `LongAdder` (useless under the lock), a `@GuardedBy` *comment*, a Caffeine
+name-drop (a strength it doesn't even have — 4.7 does) — **plus one real regression**. The measurable,
+real improvement in this repo came from **adversarial review** (two frontier models *and* a human
+senior), not from the priming. That is the actual result, and it's a more useful one: **AI + brutal
+cross-model/human review → real gains; clever-sounding priming → mostly noise.**
+
+> **Conflict-of-interest disclosure.** This repo's author agent runs on Claude; the most-built-out
+> files are Claude Opus 4.8. Every row above is a fact you can re-grep and re-run. The cross-model
+> review was also done by Claude (plus GPT-5.5), and it still demoted Claude's own files — and now a
+> human senior demoted them further, including correcting the author on 4.7's architecture. Criticism
+> that can't dethrone its own side is theatre; this one did.
 
 ## Known limitations (read before you quote the numbers)
-- **Single global lock** in all five. Fine for moderate contention; for extreme read-heavy
-  concurrency a buffer-based design (Caffeine) wins. These are self-contained util classes, not a
+- **Single global lock in five of the six.** The exception is **Opus 4.7**, which keeps reads
+  lock-free (`ConcurrentHashMap` + amortized read-buffer drain) and only locks writes. For the
+  one-lock five, that's fine for moderate contention; for extreme read-heavy load a buffer-based
+  design (Caffeine, or 4.7's own approach) wins. These are self-contained util classes, not a
   cache library.
 - **The bundled "benchmarks" are smoke checks, not JMH** — they guard against gross regressions; they
   are not publishable microbenchmarks (no fork isolation, no blackhole, no warmup protocol).
