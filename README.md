@@ -1,8 +1,9 @@
-# LRU Cache in Java 21+ — four frontier models, six takes, side by side
+# LRU Cache in Java 21+ — four frontier models, seven takes, side by side
 
-Six independently written, **thread-safe, bounded LRU cache** implementations
-for Java 21+, each as a single self-contained util class with **zero external dependencies** and
-a built-in test harness (no JUnit).
+Seven **thread-safe, bounded LRU cache** implementations for Java 21+, each a single self-contained
+util class with **zero external dependencies** and a built-in test harness (no JUnit). Five are
+verbatim model output; one is the peer-reviewed fix of the primed take; **the seventh
+(`LruCacheOpus48V7`) is the deliberately-best synthesis** assembled after the full review.
 
 All were written by the same agent (Gniewisława, running on Anthropic Claude / Google Gemini /
 OpenAI GPT) to the same prompt:
@@ -44,6 +45,7 @@ self-contained file. Rules to keep the comparison fair and honest:
 | [`src/LruCacheGpt55.java`](src/LruCacheGpt55.java) | GPT-5.5 | 726 | O(1) intrusive list + HashMap, `ReentrantLock`, `record` stats, builder, remove/clear, `SplittableRandom`-driven property-diff vs `LinkedHashMap`, virtual-thread concurrency test |
 | [`src/LruCacheOpus48Activated.java`](src/LruCacheOpus48Activated.java) | Claude Opus 4.8 *(weight-activation primed)* | 800 | Opus 4.8 again, primed on the canonical concurrency literature: **`LongAdder`** striped counters (Doug Lea) instead of `AtomicLong`, explicit `@GuardedBy("lock")` confinement (Goetz), Caffeine/W-TinyLFU named as the honest "what this is NOT", TTL + injectable clock, exhaustive pattern-matched `RemovalCause` switch, 200k-op property-diff vs JDK LRU **plus** a post-storm `checkInvariant()` |
 | [`src/LruCacheOpus48Reviewed.java`](src/LruCacheOpus48Reviewed.java) | Claude Opus 4.8 *(primed, **then peer-reviewed & fixed**)* | 845 | The Activated file after an external review by **GPT-5.5 and a second Opus 4.8 instance** found — and an attack-test confirmed — two real bugs. Fixes: (1) reentrant `computeIfAbsent` no longer duplicates a key on the list (invariant held), (2) `put` over an expired entry now counts `EXPIRED` instead of vanishing silently; plus `getOrDefault` made atomic (was check-then-act TOCTOU) and the self-contradicting `AtomicLong`→`LongAdder` Javadoc corrected. Two new regression tests lock the bugs down. **Not** verbatim — it is the *reviewed* artifact, kept separate from the verbatim outputs above. |
+| [`src/LruCacheOpus48V7.java`](src/LruCacheOpus48V7.java) | Claude Opus 4.8 *(**synthesis: best-of-all after full review**)* | ~810 | **The deliberately-best version.** Not a raw model take — assembled after the whole review (two models + a human senior). Takes the **winning idea from each file** and drops every hollow one: **lock-free reads** (4.7's architecture the senior praised — `ConcurrentHashMap` + amortized read-buffer drain, `get` takes no lock) **+** TTL/injectable-clock/`RemovalCause` (4.8) **+** all the review bug-fixes (reentrancy-safe, expired-overwrite counts, atomic `getOrDefault`) **+** the one fix *no* earlier file had: **removal/eviction listeners fire OUTSIDE the lock** (no user code under the lock → no deadlock/convoy/reentrant corruption). Drops the hollow priming wins: no `LongAdder`-under-lock, no fake `@GuardedBy` comments, no Caffeine name-drop. 35 checks incl. a reentrant-listener-under-load test and 3.2M-op lock-free concurrency. |
 
 > **Provenance note.** The Gemini and GPT files are the genuine outputs of `gemini-3.5-flash` and
 > `gpt-5.5` (Gemini: `modelVersion: gemini-3.5-flash`, `finishReason: STOP`; GPT:
@@ -102,6 +104,9 @@ javac src/LruCacheOpus48Activated.java && java -ea -cp src LruCacheOpus48Activat
 
 # Claude Opus 4.8 (primed, then peer-reviewed & fixed)
 javac src/LruCacheOpus48Reviewed.java && java -ea -cp src LruCacheOpus48Reviewed
+
+# Claude Opus 4.8 (synthesis — best-of-all after full review)
+javac src/LruCacheOpus48V7.java && java -ea -cp src LruCacheOpus48V7
 ```
 
 `-ea` enables assertions; each harness throws and exits non-zero if any check fails.
@@ -164,19 +169,25 @@ regression tests** that fail on the old code and pass on the new.
 > review was *also* done by Claude (plus GPT-5.5) is itself disclosed — and the review still demoted a
 > Claude file, which is the point: criticism that can't dethrone its own side is theatre.
 
-| Criterion | 4.7 | 4.8 | 4.8 primed | 4.8 reviewed | Gemini 3.5F | GPT-5.5 |
-| --- | :-: | :-: | :-: | :-: | :-: | :-: |
-| Compiles `-Xlint:all` clean | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Own test suite passes | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Property-diff vs JDK LRU | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| TTL + **injectable clock** | — | ✅ | ✅ | ✅ | — | — |
-| Typed `RemovalCause` callback | — | ✅ | ✅ | ✅ | — | — |
-| **Lock-free reads** (no lock in `get`) | ✅ | — | — | — | — | — |
-| **Reentrancy-safe `computeIfAbsent`** | ✅ | ✅ | ❌ | ✅ | n/a | n/a |
-| **Expired-overwrite counts `EXPIRED`** | n/a | ✅ | ❌ | ✅ | n/a | n/a |
-| **Atomic `getOrDefault`** | n/a | ✅ | ❌ | ✅ | n/a | n/a |
-| Survived adversarial cross-model + human review | — | — | — | ✅ | — | — |
-| Lines | 610 | 769 | 800 | 845 | **516** | 726 |
+| Criterion | 4.7 | 4.8 | 4.8 primed | 4.8 reviewed | **V7** | Gemini 3.5F | GPT-5.5 |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| Compiles `-Xlint:all` clean | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Own test suite passes | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Property-diff vs JDK LRU | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| TTL + **injectable clock** | — | ✅ | ✅ | ✅ | ✅ | — | — |
+| Typed `RemovalCause` callback | — | ✅ | ✅ | ✅ | ✅ | — | — |
+| **Lock-free reads** (no lock in `get`) | ✅ | — | — | — | ✅ | — | — |
+| **Reentrancy-safe `computeIfAbsent`** | ✅ | ✅ | ❌ | ✅ | ✅ | n/a | n/a |
+| **Expired-overwrite counts `EXPIRED`** | n/a | ✅ | ❌ | ✅ | ✅ | n/a | n/a |
+| **Atomic `getOrDefault`** | n/a | ✅ | ❌ | ✅ | ✅ | n/a | n/a |
+| **Listener fired OUTSIDE the lock** | — | — | — | — | ✅ | — | — |
+| Survived adversarial cross-model + human review | — | — | — | ✅ | ✅ | — | — |
+| Lines | 610 | 769 | 800 | 845 | ~810 | **516** | 726 |
+
+**`V7` is the only column that is ✅ on every correctness/architecture row** — by construction: it was
+assembled *after* the review to be exactly that. The honest catch: it is the one file that did **not**
+spring fully-formed from a single prompt; it's the product of the whole loop (generate → cross-model
+review → human senior review → synthesize). That is the point of the repo, not a caveat.
 
 ### The "priming advantages" scorecard — what a senior review did to it
 
@@ -194,15 +205,18 @@ a real advantage or just senior-sounding decoration. Every cell is re-grep-able.
 measurable gains in this repo came from the **review**, not the priming. (All fixed in `4.8 reviewed`.)
 
 **Verdict by use case:**
-- **Best overall (correctness):** **Opus 4.8 reviewed** — the only file whose bugs were found *and
-  fixed* under review, with regression tests proving it.
-- **Most interesting *architecture*:** **Opus 4.7** — and a senior reviewer (see below) singled it out:
-  it has genuine **lock-free reads** (`ConcurrentHashMap` + a read buffer drained amortized, Caffeine/
-  Guava style). `get()` takes **no lock**. The later 4.8 files actually *regressed* to "everything under
-  one `ReentrantLock`" — simpler and easier to prove correct, but architecturally less ambitious. The
-  irony: 4.8-primed *name-dropped* Caffeine as an aspiration while 4.7 quietly **is** Caffeine-style.
-- **Most feature-rich raw model output:** **Opus 4.8 primed** — but ship the *reviewed* version; the
-  raw one has the two confirmed bugs above. Kept here only to show what review caught.
+- **Best overall — ship this one:** **`LruCacheOpus48V7`** — the synthesis. Lock-free reads (4.7's
+  architecture) + TTL/clock/`RemovalCause` (4.8) + every review bug-fix + the one fix no other file had
+  (listeners fired off-lock). Only column that is ✅ across the board. The honest asterisk: it's the
+  product of the whole review loop, not one prompt — which is exactly the result this repo demonstrates.
+- **Best single peer-reviewed model file:** **Opus 4.8 reviewed** — if you want a one-lock design whose
+  bugs were found *and* fixed under review, with regression tests proving it.
+- **Most interesting *raw* architecture:** **Opus 4.7** — a senior reviewer singled it out for genuine
+  **lock-free reads** (`ConcurrentHashMap` + amortized read-buffer drain, Caffeine/Guava style); `get()`
+  takes **no lock**. The later 4.8 files *regressed* to one global lock. The irony: 4.8-primed
+  *name-dropped* Caffeine while 4.7 quietly **is** Caffeine-style — which is why V7 took 4.7's read path.
+- **Most feature-rich raw model output:** **Opus 4.8 primed** — but it has the two confirmed bugs;
+  kept only to show what review caught.
 - **Best clean baseline:** **Opus 4.8 (unprimed).** TTL, removal causes, peek, putIfAbsent without the
   literature-flex.
 - **Best minimalist:** **Gemini 3.5 Flash** — fewest lines (516) with the full property-diff harness.
