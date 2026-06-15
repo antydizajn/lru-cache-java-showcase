@@ -1,6 +1,6 @@
-# LRU Cache in Java 21+ — four frontier models, five takes, side by side
+# LRU Cache in Java 21+ — four frontier models, six takes, side by side
 
-Five independently written, **production-grade, thread-safe, bounded LRU cache** implementations
+Six independently written, **thread-safe, bounded LRU cache** implementations
 for Java 21+, each as a single self-contained util class with **zero external dependencies** and
 a built-in test harness (no JUnit).
 
@@ -31,7 +31,7 @@ self-contained file. Rules to keep the comparison fair and honest:
 - **Label the real author** — which model/version, or "human". No relabelling; provenance is the point.
 - Every submission gets run through the same harness and added to the scorecard below, verbatim.
 
-## The five implementations
+## The six implementations
 
 | File | Author | Lines | Highlights |
 | --- | --- | --- | --- |
@@ -40,6 +40,7 @@ self-contained file. Rules to keep the comparison fair and honest:
 | [`src/LruCacheGemini35Flash.java`](src/LruCacheGemini35Flash.java) | Gemini 3.5 Flash | 516 | O(1) intrusive list + HashMap, `ReentrantLock`, `record` stats (`CacheStats`), builder, remove/clear, property-diff vs `LinkedHashMap`, virtual-thread concurrency test |
 | [`src/LruCacheGpt55.java`](src/LruCacheGpt55.java) | GPT-5.5 | 726 | O(1) intrusive list + HashMap, `ReentrantLock`, `record` stats, builder, remove/clear, `SplittableRandom`-driven property-diff vs `LinkedHashMap`, virtual-thread concurrency test |
 | [`src/LruCacheOpus48Activated.java`](src/LruCacheOpus48Activated.java) | Claude Opus 4.8 *(weight-activation primed)* | 800 | Opus 4.8 again, primed on the canonical concurrency literature: **`LongAdder`** striped counters (Doug Lea) instead of `AtomicLong`, explicit `@GuardedBy("lock")` confinement (Goetz), Caffeine/W-TinyLFU named as the honest "what this is NOT", TTL + injectable clock, exhaustive pattern-matched `RemovalCause` switch, 200k-op property-diff vs JDK LRU **plus** a post-storm `checkInvariant()` |
+| [`src/LruCacheOpus48Reviewed.java`](src/LruCacheOpus48Reviewed.java) | Claude Opus 4.8 *(primed, **then peer-reviewed & fixed**)* | 845 | The Activated file after an external review by **GPT-5.5 and a second Opus 4.8 instance** found — and an attack-test confirmed — two real bugs. Fixes: (1) reentrant `computeIfAbsent` no longer duplicates a key on the list (invariant held), (2) `put` over an expired entry now counts `EXPIRED` instead of vanishing silently; plus `getOrDefault` made atomic (was check-then-act TOCTOU) and the self-contradicting `AtomicLong`→`LongAdder` Javadoc corrected. Two new regression tests lock the bugs down. **Not** verbatim — it is the *reviewed* artifact, kept separate from the verbatim outputs above. |
 
 > **Provenance note.** The Gemini and GPT files are the genuine outputs of `gemini-3.5-flash` and
 > `gpt-5.5` (Gemini: `modelVersion: gemini-3.5-flash`, `finishReason: STOP`; GPT:
@@ -95,6 +96,9 @@ javac src/LruCacheGpt55.java         && java -ea -cp src LruCacheGpt55
 
 # Claude Opus 4.8 (weight-activation primed)
 javac src/LruCacheOpus48Activated.java && java -ea -cp src LruCacheOpus48Activated
+
+# Claude Opus 4.8 (primed, then peer-reviewed & fixed)
+javac src/LruCacheOpus48Reviewed.java && java -ea -cp src LruCacheOpus48Reviewed
 ```
 
 `-ea` enables assertions; each harness throws and exits non-zero if any check fails.
@@ -117,37 +121,65 @@ All LruCacheGpt55 tests passed (smoke + property-diff vs LinkedHashMap + virtual
 
 # LruCacheOpus48Activated (Opus 4.8, weight-activation primed)
 24 named checks: smoke 9 | ttl 6 | removal 4 | property-diff (200,000 ops) 2 | concurrency (64 vthreads, 3,200,000 ops) 3 — 0 failed
+# (NOTE: its own suite passes, but a later external review found 2 bugs its suite did not cover — see below)
+
+# LruCacheOpus48Reviewed (Opus 4.8 primed, peer-reviewed & fixed)
+29 named checks incl. 2 new regression tests for the review bugs: smoke 9 | ttl 6 | removal 4 | reentrancy+expired-overwrite 5 | property-diff (200,000 ops) 2 | concurrency (64 vthreads, 3,200,000 ops) 3 — 0 failed
 ```
 
 ## Which one "wins"?
 
-Short answer: **for a real production util class, `LruCacheOpus48Activated` (Opus 4.8, primed) is the
-strongest, with plain `LruCacheOpus48` a close second.** All five compile `-Xlint:all` clean and pass
-their own suites — there is no *broken* one — so "winning" here means correctness depth, testability,
-and concurrency hygiene, not "does it work".
+Honest answer, and it changed after review: **`LruCacheOpus48Reviewed` is the strongest** — because
+it is the only file that has actually survived an adversarial cross-model review. The original
+"winner", `LruCacheOpus48Activated`, *looked* best on a feature scorecard but **had two real bugs its
+own test suite never caught.** That is the whole lesson of this repo: passing your own tests ≠ correct.
 
-> **Conflict-of-interest disclosure.** This repo's author agent runs on Claude, and the top two files
-> are both Claude Opus 4.8. Read the scorecard, not the ranking — every row is a fact you can re-grep
-> and re-run yourself. Bias is exactly why the criteria are spelled out below instead of asserted.
+### The review that changed the ranking
 
-| Criterion | 4.7 | 4.8 | 4.8 primed | Gemini 3.5F | GPT-5.5 |
-| --- | :-: | :-: | :-: | :-: | :-: |
-| Compiles `-Xlint:all` clean | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Own test suite passes | ✅ | ✅ | ✅ | ✅ | ✅ |
-| TTL + **injectable clock** (testable expiry) | — | ✅ | ✅ | — | — |
-| Typed `RemovalCause` callback | — | ✅ | ✅ | — | — |
-| `LongAdder` for contended counters | — | — | ✅ | — | — |
-| Explicit `@GuardedBy("lock")` | — | — | ✅ | — | — |
-| Property-diff vs JDK `LinkedHashMap` LRU | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Post-storm invariant re-check | — | — | ✅ | — | — |
-| `computeIfAbsent` / `peek` | ✅/— | ✅/✅ | ✅/✅ | —/— | —/— |
-| Lines (less = tighter, more = more features) | 610 | 769 | 800 | **516** | 726 |
+After the first five files were published, two other frontier models were asked to tear the
+primed file apart as ruthless senior reviewers: **GPT-5.5** (`gpt-5.5-2026-04-23`) and a **second,
+independent Opus 4.8 instance**. They *independently* flagged the same issues, and an attack-test then
+**confirmed two as real bugs**:
+
+1. **Reentrancy corruption in `computeIfAbsent`.** If the mapping function re-entered the cache
+   (e.g. `put` of the same key) under the reentrant lock, the key ended up on the list **twice** —
+   `map.size()=1` but the node appeared twice — breaking the `map.size()==listLength()` invariant.
+2. **Silent expired-overwrite.** `put` over an already-expired entry overwrote it without counting
+   `EXPIRED`, inconsistent with `putIfAbsent`/`computeIfAbsent`.
+
+Plus two correctness/honesty fixes: `getOrDefault` was a check-then-act **TOCTOU** race (now atomic),
+and the file's own Javadoc still claimed `AtomicLong` while the code used `LongAdder` (self-
+contradiction, now corrected). All four are fixed in `LruCacheOpus48Reviewed`, with two **new
+regression tests** that fail on the old code and pass on the new.
+
+> The bug pattern the reviewers flagged — **running user code (listeners, loaders) under the global
+> lock** — exists to some degree in *all* the files; it is the honest next thing to harden across the
+> board, not unique to the primed take.
+
+> **Conflict-of-interest disclosure.** This repo's author agent runs on Claude, and the top files are
+> Claude Opus 4.8. Read the scorecard, re-grep every row, re-run every harness. The fact that the
+> review was *also* done by Claude (plus GPT-5.5) is itself disclosed — and the review still demoted a
+> Claude file, which is the point: criticism that can't dethrone its own side is theatre.
+
+| Criterion | 4.7 | 4.8 | 4.8 primed | 4.8 reviewed | Gemini 3.5F | GPT-5.5 |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: |
+| Compiles `-Xlint:all` clean | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Own test suite passes | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| TTL + **injectable clock** | — | ✅ | ✅ | ✅ | — | — |
+| Typed `RemovalCause` callback | — | ✅ | ✅ | ✅ | — | — |
+| `LongAdder` counters | — | — | ✅ | ✅ | — | — |
+| Property-diff vs JDK LRU | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Reentrancy-safe `computeIfAbsent`** | ? | ? | ❌ | ✅ | n/a | n/a |
+| **Expired-overwrite counts `EXPIRED`** | n/a | ✅ | ❌ | ✅ | n/a | n/a |
+| **Atomic `getOrDefault`** | n/a | ✅ | ❌ | ✅ | n/a | n/a |
+| Survived adversarial cross-model review | — | — | — | ✅ | — | — |
+| Lines | 610 | 769 | 800 | 845 | **516** | 726 |
 
 **Verdict by use case:**
-- **Best overall / most production-ready:** **Opus 4.8 primed.** Only one with `LongAdder` striped
-  counters, `@GuardedBy` confinement, TTL with an injectable clock *and* a post-storm invariant check.
-  It is also the only file whose first compile failed and was fixed into a *better* design (`AtomicLong`
-  → `LongAdder`) — see the provenance caveat; judge it knowing that.
+- **Best overall:** **Opus 4.8 reviewed** — the only file whose bugs were found *and fixed* under
+  cross-model adversarial review, with regression tests proving it.
+- **Most feature-rich raw model output:** **Opus 4.8 primed** — but ship the *reviewed* version; the
+  raw one has the two confirmed bugs above. Kept here only to show what review caught.
 - **Best clean baseline:** **Opus 4.8 (unprimed).** Everything you actually need (TTL, removal causes,
   peek, putIfAbsent) without the literature-flex; if you dislike the primed file's one fix, take this.
 - **Best minimalist:** **Gemini 3.5 Flash** — fewest lines (516) while still shipping the full
