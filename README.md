@@ -102,7 +102,50 @@ smoke: passed | property-diff vs LinkedHashMap: passed | concurrency (virtual th
 
 # LruCacheGpt55 (GPT-5.5)
 All LruCacheGpt55 tests passed (smoke + property-diff vs LinkedHashMap + virtual-thread concurrency)
+
+# LruCacheOpus48Activated (Opus 4.8, weight-activation primed)
+24 named checks: smoke 9 | ttl 6 | removal 4 | property-diff (200,000 ops) 2 | concurrency (64 vthreads, 3,200,000 ops) 3 — 0 failed
 ```
+
+## Which one "wins"?
+
+Short answer: **for a real production util class, `LruCacheOpus48Activated` (Opus 4.8, primed) is the
+strongest, with plain `LruCacheOpus48` a close second.** All five compile `-Xlint:all` clean and pass
+their own suites — there is no *broken* one — so "winning" here means correctness depth, testability,
+and concurrency hygiene, not "does it work".
+
+> **Conflict-of-interest disclosure.** This repo's author agent runs on Claude, and the top two files
+> are both Claude Opus 4.8. Read the scorecard, not the ranking — every row is a fact you can re-grep
+> and re-run yourself. Bias is exactly why the criteria are spelled out below instead of asserted.
+
+| Criterion | 4.7 | 4.8 | 4.8 primed | Gemini 3.5F | GPT-5.5 |
+| --- | :-: | :-: | :-: | :-: | :-: |
+| Compiles `-Xlint:all` clean | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Own test suite passes | ✅ | ✅ | ✅ | ✅ | ✅ |
+| TTL + **injectable clock** (testable expiry) | — | ✅ | ✅ | — | — |
+| Typed `RemovalCause` callback | — | ✅ | ✅ | — | — |
+| `LongAdder` for contended counters | — | — | ✅ | — | — |
+| Explicit `@GuardedBy("lock")` | — | — | ✅ | — | — |
+| Property-diff vs JDK `LinkedHashMap` LRU | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Post-storm invariant re-check | — | — | ✅ | — | — |
+| `computeIfAbsent` / `peek` | ✅/— | ✅/✅ | ✅/✅ | —/— | —/— |
+| Lines (less = tighter, more = more features) | 610 | 769 | 800 | **516** | 726 |
+
+**Verdict by use case:**
+- **Best overall / most production-ready:** **Opus 4.8 primed.** Only one with `LongAdder` striped
+  counters, `@GuardedBy` confinement, TTL with an injectable clock *and* a post-storm invariant check.
+  It is also the only file whose first compile failed and was fixed into a *better* design (`AtomicLong`
+  → `LongAdder`) — see the provenance caveat; judge it knowing that.
+- **Best clean baseline:** **Opus 4.8 (unprimed).** Everything you actually need (TTL, removal causes,
+  peek, putIfAbsent) without the literature-flex; if you dislike the primed file's one fix, take this.
+- **Best minimalist:** **Gemini 3.5 Flash** — fewest lines (516) while still shipping the full
+  property-diff-vs-JDK harness. If you want the smallest thing that is still rigorously correct, this.
+- **Most distinct test scaffolding:** **GPT-5.5** — `SplittableRandom` + `IdentityHashMap` fingerprint.
+- **Simplest to read first:** **Opus 4.7** — clean minimal core, eviction listener + `computeIfAbsent`.
+
+The honest meta-finding: **priming the same model at named authorities (Lea/Goetz/Manes) measurably
+changed its output** — `LongAdder` over `AtomicLong`, `@GuardedBy` annotations, Caffeine named as the
+ceiling. Same weights, better manifold. That delta is the most interesting thing in this repo.
 
 ## Known limitations (read before you quote the numbers)
 - **Single global lock** in all four. Fine for moderate contention; for extreme read-heavy
