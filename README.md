@@ -20,6 +20,17 @@ with explicit *weight-activation priming* — the prompt named the canonical Jav
 what changes when you prime the **same model** toward the real high-quality manifold rather than the
 averaged one. See the provenance note below for the one honest caveat about it.
 
+## Want in? (open call)
+
+This is a live experiment: **how close does an AI agent get to senior-level Java?** Want to add your
+own take — human-written or from another model? Run the exact prompt above, then send me your single
+self-contained file. Rules to keep the comparison fair and honest:
+
+- **One file, zero dependencies, Java 21+.** Self-contained util class with its own `main` test harness.
+- **Must compile `-Xlint:all` clean** and pass its own checks (so does every file here).
+- **Label the real author** — which model/version, or "human". No relabelling; provenance is the point.
+- Every submission gets run through the same harness and added to the scorecard below, verbatim.
+
 ## The five implementations
 
 | File | Author | Lines | Highlights |
@@ -52,8 +63,9 @@ averaged one. See the provenance note below for the one honest caveat about it.
   JDK's own `LinkedHashMap` access-order LRU**, and a virtual-thread load test.
 
 ### Notable differences worth a reviewer's eye
-- **Opus 4.8** is the only one with **TTL + an injectable clock**, which makes expiry unit-testable
-  without `Thread.sleep` — the biggest correctness/testability jump of the four.
+- **Both Opus 4.8 files** carry **TTL + an injectable clock**, which makes expiry unit-testable
+  without `Thread.sleep` — the biggest correctness/testability jump in the set. The other three
+  (4.7, Gemini, GPT) ship no TTL.
 - **Opus 4.7** adds an eviction listener + `computeIfAbsent` over a clean minimal core.
 - **Gemini 3.5 Flash** is the most compact (516 lines) while still shipping the full
   property-diff-vs-`LinkedHashMap` harness and a virtual-thread test — a tight, idiomatic take.
@@ -148,12 +160,12 @@ changed its output** — `LongAdder` over `AtomicLong`, `@GuardedBy` annotations
 ceiling. Same weights, better manifold. That delta is the most interesting thing in this repo.
 
 ## Known limitations (read before you quote the numbers)
-- **Single global lock** in all four. Fine for moderate contention; for extreme read-heavy
+- **Single global lock** in all five. Fine for moderate contention; for extreme read-heavy
   concurrency a buffer-based design (Caffeine) wins. These are self-contained util classes, not a
   cache library.
 - **The bundled "benchmarks" are smoke checks, not JMH** — they guard against gross regressions; they
   are not publishable microbenchmarks (no fork isolation, no blackhole, no warmup protocol).
-- **Only Opus 4.8 has TTL.**
+- **Only the two Opus 4.8 files have TTL** — the 4.7, Gemini and GPT takes are pure bounded-LRU.
 
 ## License
 MIT — see [LICENSE](LICENSE).
